@@ -19,49 +19,74 @@
 // 
 //////////////////////////////////////////////////////////////////////////////////
 
-module mem_hash #(parameter N = 32, NUM_ITER = 256) (
+(* use_dsp = "no" *)
+
+module mem_hash #(parameter N = 32, M = 16, ID_WIDTH = 32, NUM_ITER = 256) (
 	input clk,
 	input rst_n,
 	input in_valid,
 	input in_ready,
 	input [4:0] in_addr,
+	input [ID_WIDTH-1:0] in_index,
 	input [N*32-1:0] mem_in,
-	output [N*32-1:0] hash_out,
+	output reg [N*32-1:0] out_hash,
+	output reg [ID_WIDTH-1:0] out_index,
 	output reg out_ready,
-	output reg done
+	output reg out_valid
 );
 
-reg have_init;
-reg [11:0] iter;
-reg [N*32-1:0] state;
+localparam LANE_WIDTH = $clog2(M);
+localparam ITER_WIDTH = $clog2(NUM_ITER);
+localparam NUM_CYCLE = 14;
+
+reg [M-1:0] have_init;
+reg [ID_WIDTH-1:0] lane_index[M-1:0];
+reg [ITER_WIDTH-1:0] iter[M-1:0];
+
+reg init_flag;
+reg [N*32-1:0] init_state;
+reg [LANE_WIDTH-1:0] next;
+reg [LANE_WIDTH-1:0] init_lane;
+
+reg [NUM_CYCLE-1:0] flag;
+reg [LANE_WIDTH-1:0] lane[NUM_CYCLE:0];
+reg [N*32-1:0] state_buf[NUM_CYCLE-1:0];
+reg [ITER_WIDTH-1:0] iter_buf[NUM_CYCLE-1:0];
+
 (* ram_style = "distributed" *)
-reg [N*32-1:0] mem[N-1:0];
+reg [N*32-1:0] state[M-1:0];
+(* ram_style = "block" *)
+reg [N*32-1:0] mem[N*M-1:0];
 
-reg state_valid;
-reg [N*32-1:0] sum_0;
-reg [N*16-1:0] sum_1;
-reg [N*8-1:0] sum_2;
-reg [N*4-1:0] sum_3;
-reg [N*2-1:0] sum_4;
-reg [N*1-1:0] sum_5;
-reg [5:0] sum_valid;
+reg [4:0] shift_0[N-1:0];
+reg [4:0] shift_11[N-1:0];
 
-reg [9:0] dir;
-reg dir_valid;
+reg [N*32-1:0] sum_1;
+reg [N*8-1:0]  sum_2;
+reg [N*2-1:0]  sum_3;
+reg [N*1-1:0]  sum[13:4];
 
-wire [4:0] bits;
-wire [4:0] offset;
-wire [4:0] mem_addr;
+reg [31:0] div_5[3:0];
+reg [31:0] div_6[1:0];
+reg [31:0] div_7;
+reg [31:0] div_8;
+reg [9:0] dir[13:9];
 
-reg [N*32-1:0] mem_tmp;
-reg [N*32-1:0] mem_tmp_1;
-reg [N*32-1:0] mem_tmp_2;
-reg [2:0] mem_tmp_valid;
+wire [4:0] bits_12;
+wire [4:0] offset_9;
+wire [4:0] offset_13;
 
-assign bits = dir;
-assign offset = (dir >> 5);
-assign mem_addr = (have_init ? offset : in_addr);
-assign hash_out = state;
+reg [N*32-1:0] mem_tmp[13:10];
+reg [N*32-1:0] mem_buf[13:12];
+reg [N*32-1:0] state_new;
+
+reg mem_write_flag;
+reg [N*32-1:0] mem_write_data;
+reg [LANE_WIDTH+9:0] mem_write_addr;
+
+assign bits_12 = dir[12];
+assign offset_9 = (dir[9] >> 5);
+assign offset_13 = (dir[13] >> 5);
 
 function [31:0] rotl_32 (input [31:0] v, input [4:0] bits);
 	begin
@@ -73,104 +98,152 @@ integer i;
 
 always @(posedge clk)
 begin
+	out_ready <= !flag[12];
+	
+	mem_write_flag <= 0;
+	
+	if(in_ready && out_valid)
+	begin
+		out_valid <= 0;
+	end
+	
+	for(i = 1; i <= NUM_CYCLE; i = i + 1)
+	begin
+		if(i < NUM_CYCLE) begin
+			iter_buf[i] <= iter_buf[i-1];
+			state_buf[i] <= state_buf[i-1];
+		end
+		lane[i] <= lane[i-1];
+	end
+	
+	if(rst_n)
+	begin
+		lane[0] <= (lane[0] + 1) % M;
+		flag <= (flag << 1) | have_init[lane[0]];
+	end
+	
+	iter_buf[0] <= iter[lane[0]];
+	state_buf[0] <= state[lane[0]];
+	
 	for(i = 0; i < 32; i = i + 1)
 	begin
-		sum_0[i*N+:N] <= rotl_32(state[i*N+:N], (iter + i) % 32);
-	end
-	for(i = 0; i < 16; i = i + 1)
-	begin
-		sum_1[i*N+:N] <= sum_0[i*N+:N] + sum_0[(16 + i)*N+:N];
+		shift_0[i] <= (iter[lane[0]] + i) % 32;
+		sum_1[i*N+:N] <= rotl_32(state_buf[0][i*N+:N], shift_0[i]);
 	end
 	for(i = 0; i < 8; i = i + 1)
 	begin
-		sum_2[i*N+:N] <= sum_1[i*N+:N] + sum_1[(8 + i)*N+:N];
-	end
-	for(i = 0; i < 4; i = i + 1)
-	begin
-		sum_3[i*N+:N] <= sum_2[i*N+:N] + sum_2[(4 + i)*N+:N];
+		sum_2[i*N+:N] <= sum_1[(i * 4 + 0)*N+:N] + sum_1[(i * 4 + 1)*N+:N] + sum_1[(i * 4 + 2)*N+:N] + sum_1[(i * 4 + 3)*N+:N];
 	end
 	for(i = 0; i < 2; i = i + 1)
 	begin
-		sum_4[i*N+:N] <= sum_3[i*N+:N] + sum_3[(2 + i)*N+:N];
+		sum_3[i*N+:N] <= sum_2[(i * 4 + 0)*N+:N] + sum_2[(i * 4 + 1)*N+:N] + sum_2[(i * 4 + 2)*N+:N] + sum_2[(i * 4 + 3)*N+:N];
 	end
 	
-	sum_5 <= sum_4[0+:N] + sum_4[N+:N];
+	sum[4] <= sum_3[0+:N] + sum_3[N+:N];
+	sum[5] <= sum[4];
+	sum[6] <= sum[5];
+	sum[7] <= sum[6];
+	sum[8] <= sum[7];
+	sum[9] <= sum[8];
+	sum[10] <= sum[9];
+	sum[11] <= sum[10];
+	sum[12] <= sum[11];
+	sum[13] <= sum[12];
 	
-	if(state_valid) begin
-		sum_valid <= 1;
-		state_valid <= 0;
-	end else begin
-		sum_valid <= (sum_valid << 1);
+//	dir <= sum % 1193;
+	div_5[0] <= ({32'b0, sum[4]} * 22'b0000000000001100001100) >> 32;
+	div_5[1] <= ({32'b0, sum[4]} * 22'b0000000010110000000000) >> 32;
+	div_5[2] <= ({32'b0, sum[4]} * 22'b0000101100000000000000) >> 32;
+	div_5[3] <= ({32'b0, sum[4]} * 22'b1101000000000000000000) >> 32;
+	
+	div_6[0] <= div_5[0] + div_5[1];
+	div_6[1] <= div_5[2] + div_5[3];
+	
+	div_7    <= div_6[0] + div_6[1];
+	div_8    <= div_7 * 3600140;
+	
+	dir[9]  <= sum[8] - div_8;
+	dir[10] <= dir[9];
+	dir[11] <= dir[10];
+	dir[12] <= dir[11];
+	dir[13] <= dir[12];
+	
+	if(flag[9])
+	begin
+		mem_tmp[10] <= mem[lane[10] * N + offset_9];
 	end
-	
-//	dir <= sum_5 % 1193;
-	dir <= sum_5 - ((sum_5 * 3600140) >> 32);
-	dir_valid <= sum_valid[5];
+	mem_tmp[11] <= mem_tmp[10];
+	mem_buf[12] <= mem_tmp[11];
+	mem_buf[13] <= mem_buf[12];
 	
 	for(i = 0; i < 32; i = i + 1)
 	begin
-		mem_tmp_1[i*N+:N] <= mem_tmp[((iter + i) % 32)*N+:N];
+		shift_11[i] <= (iter_buf[10] + i) % 32;
 		
-		mem_tmp_2[i*N+:N] <= rotl_32(mem_tmp_1[i*N+:N], bits);
+		mem_tmp[12][i*N+:N] <= mem_tmp[11][shift_11[i]*N+:N];
+		
+		mem_tmp[13][i*N+:N] <= rotl_32(mem_tmp[12][i*N+:N], bits_12);
 	end
 	
-	if(mem_tmp_valid[2])
+	if(flag[13])
 	begin
 		for(i = 0; i < 32; i = i + 1)
 		begin
-			state[i*N+:N] <= state[i*N+:N] + (mem_tmp_2[i*N+:N] ^ sum_5);
+			state_new[i*N+:N] = state_buf[13][i*N+:N] + (mem_tmp[13][i*N+:N] ^ sum[13]);
 		end
-		if(iter == NUM_ITER - 1) begin
-			done <= 1;
-		end else begin
-			state_valid <= 1;
-			iter <= iter + 1;
+		state[lane[14]] <= state_new;
+		
+		mem_write_flag <= 1;
+		mem_write_addr <= lane[14] * N + offset_13;
+		mem_write_data <= state_new ^ mem_buf[13];
+		
+		if(iter_buf[13] == NUM_ITER - 1)
+		begin
+			out_hash <= state_new;
+			out_index <= lane_index[lane[14]];
+			out_valid <= 1;
+			have_init[lane[14]] <= 0;
+		end
+		else begin
+			iter[lane[14]] <= iter_buf[13] + 1;
 		end
 	end
-	
-	if(in_ready && done)
+	else if(init_flag && init_lane == lane[14])
 	begin
-		done <= 0;
-		out_ready <= 1;
-		have_init <= 0;
+		init_flag <= 0;
+		iter[lane[14]] <= 0;
+		state[lane[14]] <= init_state;
+		have_init[lane[14]] <= 1;
+	end
+	
+	if(rst_n && mem_write_flag)
+	begin
+		mem[mem_write_addr] <= mem_write_data;
 	end
 	
 	if(!rst_n)
 	begin
-		done <= 0;
+		next <= 0;
+		flag <= 0;
+		lane[0] <= 0;
+		init_flag <= 0;
+		out_valid <= 0;
 		out_ready <= 1;
 		have_init <= 0;
 	end
-	else if(!have_init)
+	else if(in_valid && out_ready)
 	begin
-		if(in_valid && out_ready)
+		if(in_addr == 31)
 		begin
-			if(in_addr == 31)
-			begin
-				iter <= 0;
-				state_valid <= 1;
-				sum_valid <= 0;
-				dir_valid <= 0;
-				mem_tmp_valid <= 0;
-				state <= mem_in;
-				have_init <= 1;
-				out_ready <= 0;
-			end
-			mem[mem_addr] <= mem_in;
+			init_flag <= 1;
+			init_lane <= next;
+			init_state <= mem_in;
+			lane_index[next] <= in_index;
+			next <= (next + 1) % M;
 		end
-	end
-	else begin
-		if(dir_valid)
-		begin
-			mem_tmp <= mem[mem_addr];
-			mem_tmp_valid <= 1;
-		end else begin
-			mem_tmp_valid <= (mem_tmp_valid << 1);
-		end
-		if(state_valid && iter > 0)
-		begin
-			mem[mem_addr] <= mem_tmp ^ state;
-		end
+		mem_write_flag <= 1;
+		mem_write_addr <= next * N + in_addr;
+		mem_write_data <= mem_in;
 	end
 end
 

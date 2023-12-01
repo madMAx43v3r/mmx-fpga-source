@@ -40,8 +40,8 @@ localparam ITER_WIDTH = $clog2(NUM_ITER);
 localparam NUM_CYCLE = 13;
 
 reg [M-1:0] have_init;
-reg [ID_WIDTH-1:0] lane_index[M-1:0];
-reg [ITER_WIDTH-1:0] iter[M-1:0];
+reg [ID_WIDTH-1:0] lane_index [M-1:0];
+reg [ITER_WIDTH-1:0] iter [M-1:0];
 
 reg init_flag;
 reg [N*32-1:0] init_state;
@@ -49,34 +49,34 @@ reg [LANE_WIDTH-1:0] next;
 reg [LANE_WIDTH-1:0] init_lane;
 
 reg [NUM_CYCLE-1:0] flag;
-reg [LANE_WIDTH-1:0] lane[NUM_CYCLE:0];
-reg [N*32-1:0] state_buf[NUM_CYCLE-1:0];
-reg [ITER_WIDTH-1:0] iter_buf[NUM_CYCLE-1:0];
+reg [LANE_WIDTH-1:0] lane [NUM_CYCLE:0];
+reg [N*32-1:0] state_buf [NUM_CYCLE-1:0];
+reg [ITER_WIDTH-1:0] iter_buf [NUM_CYCLE-1:0];
 
 (* ram_style = "distributed" *)
-reg [N*32-1:0] state[M-1:0];
+reg [N*32-1:0] state [M-1:0];
 (* ram_style = "block" *)
-reg [N*32-1:0] mem[N*M-1:0];
+reg [N*32-1:0] mem [N*M-1:0];
 
-reg [4:0] shift_0[N-1:0];
-reg [4:0] shift_10[N-1:0];
+reg [4:0] shift_0 [N-1:0];
+reg [4:0] shift_10 [N-1:0];
 
 reg [N*32-1:0] sum_1;
 reg [N*8-1:0]  sum_2;
 reg [N*2-1:0]  sum_3;
-reg [N*1-1:0]  sum[12:4];
+reg [N*1-1:0]  sum [12:4];
 
 reg [31:0] div_5[3:0];
 reg [31:0] div_6;
 reg [31:0] div_7;
-reg [9:0] dir[12:8];
+reg [9:0]  dir [12:8];
 
 wire [4:0] bits_11;
 wire [4:0] offset_8;
 wire [4:0] offset_12;
 
-reg [N*32-1:0] mem_tmp[12:9];
-reg [N*32-1:0] mem_buf[12:11];
+reg [N*32-1:0] mem_tmp [12:9];
+reg [N*32-1:0] mem_buf [12:11];
 reg [N*32-1:0] state_new;
 
 reg mem_write_flag;
@@ -101,7 +101,7 @@ begin
 	
 	mem_write_flag <= 0;
 	
-	if(in_ready && out_valid)
+	if(in_ready)
 	begin
 		out_valid <= 0;
 	end
@@ -158,7 +158,7 @@ begin
 	div_7    <= div_6 * 3600140;
 	
 	dir[8]  <= sum[7] - div_7;
-	dir[9] <= dir[8];
+	dir[9]  <= dir[8];
 	dir[10] <= dir[9];
 	dir[11] <= dir[10];
 	dir[12] <= dir[11];

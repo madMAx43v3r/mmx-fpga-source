@@ -27,13 +27,14 @@ module gen_mem_array #(parameter N = 32, M = 32, ID_WIDTH = 32) (
 	input [(16*N)-1:0] key_in,
 	input [ID_WIDTH-1:0] in_index,
 	output reg [5:0] out_addr,
-	output reg [(N*32)-1:0] out_data,
+	output reg [(N*16)-1:0] out_data,
 	output [ID_WIDTH-1:0] out_index,
 	output reg out_valid,
 	output reg out_ready
 );
 
 localparam NUM_CYCLE = 16 * 8;
+localparam BUFFER_DEPTH = M * N * 2;
 
 reg init_flag;
 reg [NUM_CYCLE-1:0] flag;
@@ -44,27 +45,17 @@ reg  [(N*16)-1:0] state_init;
 wire clk_en;
 wire [(N*16)-1:0] state [4:0];
 
-reg [(N*32)-1:0] out_buffer [M-1:0];
+reg buffer_init;
+reg buffer_switch;
+reg [ID_WIDTH-1:0] buffer_index[(M*2)-1:0];
+reg [(N*16)-1:0] buffer [(BUFFER_DEPTH*2)-1:0];
 
 chacha_block B0 (clk, clk_en, state[0], state[1]);
 chacha_block B1 (clk, clk_en, state[1], state[2]);
 chacha_block B2 (clk, clk_en, state[2], state[3]);
 chacha_block B3 (clk, clk_en, state[3], state[4]);
 
-wire out_flag;
-wire index_fifo_read;
-wire index_fifo_write;
-
-sync_fifo #(.WIDTH(ID_WIDTH), .SIZE(5)) index_fifo(
-	.clk(clk),
-	.rst_n(rst_n),
-	.w_en(index_fifo_write),
-	.r_en(index_fifo_read),
-	.data_in(in_index),
-	.data_out(out_index)
-);
-
-assign clk_en = (in_ready || !out_valid);
+assign clk_en = (buffer_init || in_valid);	// TODO: block when buffer full
 
 assign out_flag = flag[NUM_CYCLE - 1];
 assign index_fifo_read = clk_en && rst_n && out_flag;

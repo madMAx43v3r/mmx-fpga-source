@@ -22,7 +22,7 @@
 module chacha_block #(parameter N = 32) (
 	input clk,
 	input clk_en,
-	input [(N*16)-1:0] in,
+	input  [(N*16)-1:0] in,
 	output [(N*16)-1:0] out
 );
 
